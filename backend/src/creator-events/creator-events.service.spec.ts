@@ -1,117 +1,93 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
+import { ContractService } from '../contract/contract.service';
+import { CreatorEvent } from '../matches/entities/creator-event.entity';
 import { CreatorEventsService } from './creator-events.service';
-import { CreatorEvent } from './entities/creator-event.entity';
-import { CreatorEventMatch } from './entities/creator-event-match.entity';
-import { CreatorEventPrediction } from './entities/creator-event-prediction.entity';
-import { CreatorEventWinner } from './entities/creator-event-winner.entity';
-import { WinnersQueryDto } from './dto/winners-query.dto';
-import { LeaderboardQueryDto } from './dto/leaderboard-query.dto';
+import { CreatorEventSearchStatus } from './dto/search-events-query.dto';
 
-type MockRepo = jest.Mocked<
-  Pick<Repository<any>, 'findOne' | 'createQueryBuilder' | 'find' | 'findByIds'>
->;
+type MockSearchQueryBuilder = jest.Mocked<
+  Pick<
+    SelectQueryBuilder<CreatorEvent>,
+    | 'addSelect'
+    | 'where'
+    | 'andWhere'
+    | 'setParameter'
+    | 'clone'
+    | 'orderBy'
+    | 'addOrderBy'
+    | 'skip'
+    | 'take'
+    | 'getRawAndEntities'
+  >
+> & {
+  getCount: jest.Mock;
+};
 
-function createMockQueryBuilder(returnValue: any): any {
-  return {
-    where: jest.fn().mockReturnThis(),
-    andWhere: jest.fn().mockReturnThis(),
-    orderBy: jest.fn().mockReturnThis(),
-    addOrderBy: jest.fn().mockReturnThis(),
-    skip: jest.fn().mockReturnThis(),
-    take: jest.fn().mockReturnThis(),
-    getManyAndCount: jest.fn().mockResolvedValue(returnValue),
-    getRawMany: jest.fn().mockResolvedValue(returnValue?.[0] || []),
-    getCount: jest.fn().mockResolvedValue(returnValue?.[1] || 0),
-    select: jest.fn().mockReturnThis(),
-    groupBy: jest.fn().mockReturnThis(),
-    having: jest.fn().mockReturnThis(),
-    addSelect: jest.fn().mockReturnThis(),
-    getOne: jest.fn().mockResolvedValue(null),
-  };
-}
-
-describe('CreatorEventsService', () => {
+describe('CreatorEventsService searchEvents', () => {
   let service: CreatorEventsService;
-  let eventRepo: MockRepo;
-  let matchRepo: MockRepo;
-  let predictionRepo: MockRepo;
-  let winnerRepo: MockRepo;
+  let creatorEventRepository: jest.Mocked<
+    Pick<Repository<CreatorEvent>, 'createQueryBuilder'>
+  >;
+  let queryBuilder: MockSearchQueryBuilder;
+  let countQueryBuilder: { getCount: jest.Mock };
 
-  const mockEvent = {
-    id: 'event-1',
-    on_chain_event_id: '1',
-    creator_address: 'GABC123',
-    title: 'Test Event',
-    is_active: true,
-    is_cancelled: false,
-    winners_verified: true,
-  } as CreatorEvent;
-
-  const mockWinners = [
-    {
-      id: 'w1',
-      event_id: 'event-1',
-      user_address: 'GUSER1',
-      total_correct: 5,
-      total_matches: 5,
-      completion_time: new Date('2026-01-01T10:00:00Z'),
-      verified_at: new Date('2026-01-02T10:00:00Z'),
-    },
-    {
-      id: 'w2',
-      event_id: 'event-1',
-      user_address: 'GUSER2',
-      total_correct: 5,
-      total_matches: 5,
-      completion_time: new Date('2026-01-01T12:00:00Z'),
-      verified_at: new Date('2026-01-02T10:00:00Z'),
-    },
-  ] as CreatorEventWinner[];
+  const makeEvent = (overrides: Partial<CreatorEvent> = {}): CreatorEvent =>
+    ({
+      id: 'event-1',
+      on_chain_event_id: 101,
+      creator_address: '0xCreatorAddress',
+      title: 'Champions League Final',
+      description: 'Predict the Champions League winner',
+      creation_fee_paid: '100',
+      on_chain_created_at: new Date('2026-05-01T00:00:00.000Z'),
+      is_active: true,
+      is_cancelled: false,
+      invite_code: null,
+      max_participants: 500,
+      participant_count: 42,
+      match_count: 3,
+      matches: [],
+      created_at: new Date('2026-05-01T00:00:00.000Z'),
+      ...overrides,
+    }) as CreatorEvent;
 
   beforeEach(async () => {
-    eventRepo = {
-      findOne: jest.fn(),
-      createQueryBuilder: jest.fn(),
-      find: jest.fn(),
-      findByIds: jest.fn(),
+    countQueryBuilder = {
+      getCount: jest.fn().mockResolvedValue(1),
     };
 
-    matchRepo = {
-      findOne: jest.fn(),
-      createQueryBuilder: jest.fn(),
-      find: jest.fn(),
-      findByIds: jest.fn(),
+    queryBuilder = {
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      setParameter: jest.fn().mockReturnThis(),
+      clone: jest.fn().mockReturnValue(countQueryBuilder),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getRawAndEntities: jest.fn().mockResolvedValue({
+        entities: [makeEvent()],
+        raw: [{ search_rank: '0.98' }],
+      }),
+      getCount: jest.fn(),
     };
 
-    predictionRepo = {
-      findOne: jest.fn(),
-      createQueryBuilder: jest.fn(),
-      find: jest.fn(),
-      findByIds: jest.fn(),
-    };
-
-    winnerRepo = {
-      findOne: jest.fn(),
-      createQueryBuilder: jest.fn(),
-      find: jest.fn(),
-      findByIds: jest.fn(),
+    creatorEventRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CreatorEventsService,
-        { provide: getRepositoryToken(CreatorEvent), useValue: eventRepo },
-        { provide: getRepositoryToken(CreatorEventMatch), useValue: matchRepo },
         {
-          provide: getRepositoryToken(CreatorEventPrediction),
-          useValue: predictionRepo,
+          provide: ContractService,
+          useValue: {},
         },
         {
-          provide: getRepositoryToken(CreatorEventWinner),
-          useValue: winnerRepo,
+          provide: getRepositoryToken(CreatorEvent),
+          useValue: creatorEventRepository,
         },
       ],
     }).compile();
@@ -119,179 +95,112 @@ describe('CreatorEventsService', () => {
     service = module.get<CreatorEventsService>(CreatorEventsService);
   });
 
-  describe('getWinners', () => {
-    it('should throw NotFoundException when event does not exist', async () => {
-      eventRepo.findOne.mockResolvedValue(null);
-
-      await expect(
-        service.getWinners('nonexistent', new WinnersQueryDto()),
-      ).rejects.toThrow(NotFoundException);
+  it('returns ranked full-text search results with highlights', async () => {
+    const result = await service.searchEvents({
+      q: 'champions',
+      page: 1,
+      limit: 20,
+      status: CreatorEventSearchStatus.All,
     });
 
-    it('should return empty data when winners are not verified', async () => {
-      eventRepo.findOne.mockResolvedValue({
-        ...mockEvent,
-        winners_verified: false,
-      });
-
-      const result = await service.getWinners('event-1', new WinnersQueryDto());
-
-      expect(result).toEqual({ data: [], total: 0, page: 1, limit: 20 });
-    });
-
-    it('should return winners sorted by completion time ascending', async () => {
-      eventRepo.findOne.mockResolvedValue(mockEvent);
-      const qb = createMockQueryBuilder([mockWinners, 2]);
-      winnerRepo.createQueryBuilder.mockReturnValue(qb);
-
-      const result = await service.getWinners('event-1', new WinnersQueryDto());
-
-      expect(winnerRepo.createQueryBuilder).toHaveBeenCalledWith('w');
-      expect(qb.orderBy).toHaveBeenCalledWith('w.completion_time', 'ASC');
-      expect(result.data).toHaveLength(2);
-      expect(result.data[0].user_address).toBe('GUSER1');
-      expect(result.data[0].rank).toBe(1);
-      expect(result.data[1].user_address).toBe('GUSER2');
-      expect(result.data[1].rank).toBe(2);
-    });
-
-    it('should include correct fields in winner response', async () => {
-      eventRepo.findOne.mockResolvedValue(mockEvent);
-      const qb = createMockQueryBuilder([mockWinners, 2]);
-      winnerRepo.createQueryBuilder.mockReturnValue(qb);
-
-      const result = await service.getWinners('event-1', new WinnersQueryDto());
-
-      expect(result.data[0]).toEqual({
-        rank: 1,
-        user_address: 'GUSER1',
-        total_correct: 5,
-        total_matches: 5,
-        completion_time: mockWinners[0].completion_time.toISOString(),
-        verified_at: mockWinners[0].verified_at.toISOString(),
-      });
-    });
-
-    it('should handle pagination correctly', async () => {
-      eventRepo.findOne.mockResolvedValue(mockEvent);
-      const qb = createMockQueryBuilder([mockWinners, 2]);
-      winnerRepo.createQueryBuilder.mockReturnValue(qb);
-
-      const result = await service.getWinners('event-1', {
-        page: 1,
-        limit: 10,
-      });
-
-      expect(qb.skip).toHaveBeenCalledWith(0);
-      expect(qb.take).toHaveBeenCalledWith(10);
-      expect(result.page).toBe(1);
-      expect(result.limit).toBe(10);
+    expect(creatorEventRepository.createQueryBuilder).toHaveBeenCalledWith(
+      'creatorEvent',
+    );
+    expect(queryBuilder.addSelect).toHaveBeenCalledWith(
+      expect.stringContaining('ts_rank_cd'),
+      'search_rank',
+    );
+    expect(queryBuilder.where).toHaveBeenCalled();
+    expect(queryBuilder.setParameter).toHaveBeenCalledWith(
+      'searchTerm',
+      'champions',
+    );
+    expect(queryBuilder.orderBy).toHaveBeenCalledWith('search_rank', 'DESC');
+    expect(queryBuilder.addOrderBy).toHaveBeenCalledWith(
+      'creatorEvent.participant_count',
+      'DESC',
+    );
+    expect(queryBuilder.skip).toHaveBeenCalledWith(0);
+    expect(queryBuilder.take).toHaveBeenCalledWith(20);
+    expect(result).toEqual({
+      data: [
+        expect.objectContaining({
+          id: 'event-1',
+          rank: 0.98,
+          highlights: expect.objectContaining({
+            title: '<mark>Champions</mark> League Final',
+            description: 'Predict the <mark>Champions</mark> League winner',
+          }),
+        }),
+      ],
+      total: 1,
+      page: 1,
+      limit: 20,
+      totalPages: 1,
+      query: 'champions',
     });
   });
 
-  describe('getLeaderboard', () => {
-    const mockRawResults = [
-      {
-        user_address: 'GUSER1',
-        total_predictions: '10',
-        correct_predictions: '10',
-        last_prediction_time: new Date('2026-01-01T10:00:00Z'),
-      },
-      {
-        user_address: 'GUSER2',
-        total_predictions: '10',
-        correct_predictions: '8',
-        last_prediction_time: new Date('2026-01-01T12:00:00Z'),
-      },
-    ];
-
-    it('should throw NotFoundException when event does not exist', async () => {
-      eventRepo.findOne.mockResolvedValue(null);
-
-      await expect(
-        service.getLeaderboard('nonexistent', new LeaderboardQueryDto()),
-      ).rejects.toThrow(NotFoundException);
+  it('applies status and creator filters', async () => {
+    await service.searchEvents({
+      q: 'league',
+      page: 2,
+      limit: 10,
+      status: CreatorEventSearchStatus.Active,
+      creator: '0xCreatorAddress',
     });
 
-    it('should return leaderboard with correct calculations', async () => {
-      eventRepo.findOne.mockResolvedValue(mockEvent);
-      const qb = createMockQueryBuilder([mockRawResults, 2]);
-      predictionRepo.createQueryBuilder.mockReturnValue(qb);
-      winnerRepo.find.mockResolvedValue([mockWinners[0]]);
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'creatorEvent.is_active = :isActive',
+      { isActive: true },
+    );
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'creatorEvent.is_cancelled = :isCancelled',
+      { isCancelled: false },
+    );
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'LOWER(creatorEvent.creator_address) = LOWER(:creator)',
+      { creator: '0xCreatorAddress' },
+    );
+    expect(queryBuilder.skip).toHaveBeenCalledWith(10);
+  });
 
-      const result = await service.getLeaderboard(
-        'event-1',
-        new LeaderboardQueryDto(),
-      );
-
-      expect(result.data).toHaveLength(2);
-      expect(result.data[0].user_address).toBe('GUSER1');
-      expect(result.data[0].total_predictions).toBe(10);
-      expect(result.data[0].correct_predictions).toBe(10);
-      expect(result.data[0].accuracy_percentage).toBe(100);
-      expect(result.data[0].is_winner).toBe(true);
-      expect(result.data[1].is_winner).toBe(false);
+  it('supports cancelled and inactive status filters', async () => {
+    await service.searchEvents({
+      q: 'league',
+      status: CreatorEventSearchStatus.Cancelled,
+    });
+    await service.searchEvents({
+      q: 'league',
+      status: CreatorEventSearchStatus.Inactive,
     });
 
-    it('should apply minPredictions filter', async () => {
-      eventRepo.findOne.mockResolvedValue(mockEvent);
-      const qb = createMockQueryBuilder([mockRawResults, 2]);
-      predictionRepo.createQueryBuilder.mockReturnValue(qb);
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'creatorEvent.is_cancelled = :isCancelled',
+      { isCancelled: true },
+    );
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'creatorEvent.is_active = :isActive',
+      { isActive: false },
+    );
+  });
 
-      await service.getLeaderboard('event-1', {
-        page: 1,
-        limit: 20,
-        minPredictions: 5,
-      });
-
-      expect(qb.having).toHaveBeenCalledWith('COUNT(p.id) >= :minPredictions', {
-        minPredictions: 5,
-      });
+  it('returns an empty page for blank queries without touching the database', async () => {
+    const result = await service.searchEvents({
+      q: '   ',
+      page: 1,
+      limit: 20,
+      status: CreatorEventSearchStatus.All,
     });
 
-    it('should sort by correct predictions desc, total predictions desc, completion time asc', async () => {
-      eventRepo.findOne.mockResolvedValue(mockEvent);
-      const qb = createMockQueryBuilder([mockRawResults, 2]);
-      predictionRepo.createQueryBuilder.mockReturnValue(qb);
-      winnerRepo.find.mockResolvedValue([]);
-
-      await service.getLeaderboard('event-1', new LeaderboardQueryDto());
-
-      expect(qb.orderBy).toHaveBeenCalledWith('correct_predictions', 'DESC');
-      expect(qb.addOrderBy).toHaveBeenCalledWith('total_predictions', 'DESC');
-      expect(qb.addOrderBy).toHaveBeenCalledWith('last_prediction_time', 'ASC');
+    expect(result).toEqual({
+      data: [],
+      total: 0,
+      page: 1,
+      limit: 20,
+      totalPages: 0,
+      query: '',
     });
-
-    it('should return empty leaderboard when event has no predictions', async () => {
-      eventRepo.findOne.mockResolvedValue(mockEvent);
-      const qb = createMockQueryBuilder([[], 0]);
-      predictionRepo.createQueryBuilder.mockReturnValue(qb);
-      winnerRepo.find.mockResolvedValue([]);
-
-      const result = await service.getLeaderboard(
-        'event-1',
-        new LeaderboardQueryDto(),
-      );
-
-      expect(result.data).toHaveLength(0);
-      expect(result.total).toBe(0);
-    });
-
-    it('should handle pagination in leaderboard', async () => {
-      eventRepo.findOne.mockResolvedValue(mockEvent);
-      const qb = createMockQueryBuilder([mockRawResults, 2]);
-      predictionRepo.createQueryBuilder.mockReturnValue(qb);
-      winnerRepo.find.mockResolvedValue([]);
-
-      const result = await service.getLeaderboard('event-1', {
-        page: 1,
-        limit: 5,
-      });
-
-      expect(qb.skip).toHaveBeenCalledWith(0);
-      expect(qb.take).toHaveBeenCalledWith(5);
-      expect(result.page).toBe(1);
-      expect(result.limit).toBe(5);
-    });
+    expect(creatorEventRepository.createQueryBuilder).not.toHaveBeenCalled();
   });
 });
