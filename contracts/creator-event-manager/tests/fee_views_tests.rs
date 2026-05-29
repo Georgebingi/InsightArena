@@ -62,6 +62,9 @@ fn test_treasury_balance_and_withdraw_success() {
     // fund creator
     StellarAssetClient::new(&env, &xlm_token).mint(&creator, &FEE);
 
+    let token = TokenClient::new(&env, &xlm_token);
+    token.approve(&treasury, &contract_id, &FEE, &0u32);
+
     let (_event_id, _invite_code) = client.create_event(&creator, &title(&env), &desc(&env), &2u32);
 
     // Treasury address should now have the fee
