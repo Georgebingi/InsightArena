@@ -30,7 +30,7 @@ export class SeasonsService {
     private readonly sorobanService: SorobanService,
     private readonly notificationsService: NotificationsService,
     private readonly dataSource: DataSource,
-  ) {}
+  ) { }
 
   async findAllPaginated(
     query: ListSeasonsDto,
@@ -61,10 +61,10 @@ export class SeasonsService {
     const top_winner: SeasonTopWinnerDto | null =
       season.is_finalized && tw
         ? {
-            user_id: tw.id,
-            username: tw.username,
-            stellar_address: tw.stellar_address,
-          }
+          user_id: tw.id,
+          username: tw.username,
+          stellar_address: tw.stellar_address,
+        }
         : null;
 
     return {
@@ -259,8 +259,8 @@ export class SeasonsService {
       // Step 5: Create winner notification (outside transaction)
       if (topWinner) {
         await this.notificationsService.create(
-          topWinner.id,
-          NotificationType.System,
+          topWinner.stellar_address,
+          NotificationType.EventCreated,
           '🎉 Season Winner!',
           `Congratulations! You are the winner of the ${season.name} season with the highest points!`,
           {

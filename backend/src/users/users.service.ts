@@ -66,7 +66,7 @@ export class UsersService {
     private readonly participantsRepository: Repository<CompetitionParticipant>,
     @InjectRepository(UserBookmark)
     private readonly userBookmarksRepository: Repository<UserBookmark>,
-  ) {}
+  ) { }
 
   async findAll(): Promise<User[]> {
     return this.usersRepository.find();
@@ -292,7 +292,7 @@ export class UsersService {
           where: { creator: { id: user.id } },
         }),
         this.notificationsRepository.find({
-          where: { user: { id: user.id } },
+          where: { user_address: user.stellar_address },
           order: { created_at: 'DESC' },
         }),
         this.participantsRepository.find({
@@ -337,7 +337,7 @@ export class UsersService {
         type: n.type,
         title: n.title,
         message: n.message,
-        is_read: n.is_read,
+        read: n.read,
         created_at: n.created_at,
       })),
       competitions_joined: competitions.map((c) => ({
