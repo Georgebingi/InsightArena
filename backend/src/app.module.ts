@@ -33,6 +33,8 @@ import { SorobanModule } from './soroban/soroban.module';
 import { UsersModule } from './users/users.module';
 import { DisputesModule } from './disputes/disputes.module';
 import { ContractModule } from './contract/contract.module';
+import { CacheWarmingModule } from './cache/cache-warming.module';
+import { WebsocketModule } from './websocket/websocket.module';
 
 @Module({
   imports: [
@@ -96,6 +98,8 @@ import { ContractModule } from './contract/contract.module';
     MatchesModule,
     IndexerModule,
     ContractModule,
+    CacheWarmingModule,
+    WebsocketModule,
   ],
 
   controllers: [AppController],

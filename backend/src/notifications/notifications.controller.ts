@@ -8,6 +8,7 @@ import {
   Body,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -17,41 +18,75 @@ import {
   ApiQuery,
 } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
-import { UsersService } from '../users/users.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { Notification } from './entities/notification.entity';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
 @ApiTags('Notifications')
 @ApiBearerAuth()
 @Controller('notifications')
 export class NotificationsController {
-  constructor(
-    private readonly notificationsService: NotificationsService,
-    private readonly usersService: UsersService,
-  ) {}
+  constructor(private readonly notificationsService: NotificationsService) {}
 
-  @Get()
-  @ApiOperation({ summary: 'Get notifications for authenticated user' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'limit', required: false, type: Number })
-  @ApiQuery({ name: 'unread_only', required: false, type: Boolean })
-  @ApiResponse({ status: 200, description: 'Paginated notifications list' })
-  async getMyNotifications(
+  @Get(':address')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get notifications for a user by address' })
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
+  @ApiQuery({
+    name: 'read',
+    required: false,
+    type: String,
+    enum: ['true', 'false', 'all'],
+    example: 'all',
+  })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    type: String,
+    description: 'Filter by notification type',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Paginated notifications list with unread count',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getNotifications(
+    @Param('address') address: string,
     @CurrentUser() user: User,
     @Query('page') page = 1,
     @Query('limit') limit = 20,
-    @Query('unread_only') unreadOnly?: string,
+    @Query('read') read?: string,
+    @Query('type') type?: string,
   ) {
+    // Verify user can only access their own notifications
+    if (user.stellar_address !== address) {
+      return {
+        success: false,
+        message: 'Unauthorized',
+        statusCode: 401,
+      };
+    }
+
+    let readFilter: boolean | undefined;
+    if (read === 'true') {
+      readFilter = true;
+    } else if (read === 'false') {
+      readFilter = false;
+    }
+
     return this.notificationsService.findAllForUser(
-      user.id,
+      address,
       Number(page),
       Number(limit),
-      unreadOnly === 'true',
+      readFilter,
+      type,
     );
   }
 
   @Patch(':id/read')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Mark a notification as read' })
   @ApiResponse({ status: 204, description: 'Marked as read' })
@@ -59,46 +94,23 @@ export class NotificationsController {
     @Param('id') id: string,
     @CurrentUser() user: User,
   ): Promise<void> {
-    return this.notificationsService.markAsRead(id, user.id);
+    return this.notificationsService.markAsRead(
+      Number(id),
+      user.stellar_address,
+    );
   }
 
   @Patch('read-all')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark all notifications as read' })
   @ApiResponse({ status: 200, description: 'Count of notifications updated' })
   async markAllAsRead(@CurrentUser() user: User): Promise<{ updated: number }> {
-    return this.notificationsService.markAllAsRead(user.id);
-  }
-
-  @Patch(':address/read')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Mark notifications as read by user address' })
-  @ApiResponse({ status: 200, description: 'Count of notifications updated' })
-  async markAsReadByAddress(
-    @Param('address') address: string,
-    @Body() body: { notificationIds?: string[]; markAll?: boolean },
-    @CurrentUser() user: User,
-  ): Promise<{ updated: number }> {
-    const targetUser = await this.usersService.findByAddress(address);
-    if (!targetUser || targetUser.id !== user.id) {
-      return { updated: 0 };
-    }
-
-    if (body.markAll) {
-      return this.notificationsService.markAllAsRead(user.id);
-    }
-
-    if (body.notificationIds && body.notificationIds.length > 0) {
-      return this.notificationsService.markMultipleAsRead(
-        user.id,
-        body.notificationIds,
-      );
-    }
-
-    return { updated: 0 };
+    return this.notificationsService.markAllAsRead(user.stellar_address);
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a notification' })
   @ApiResponse({ status: 204, description: 'Notification deleted' })
@@ -106,6 +118,6 @@ export class NotificationsController {
     @Param('id') id: string,
     @CurrentUser() user: User,
   ): Promise<void> {
-    return this.notificationsService.remove(id, user.id);
+    return this.notificationsService.remove(Number(id), user.stellar_address);
   }
 }

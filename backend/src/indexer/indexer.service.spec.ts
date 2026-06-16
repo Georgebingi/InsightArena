@@ -1,7 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import {
+  DeleteResult,
+  InsertResult,
+  Repository,
+  SelectQueryBuilder,
+} from 'typeorm';
 import { IndexerService } from './indexer.service';
 import {
   ContractEvent,
@@ -13,6 +18,8 @@ import { CreatorEvent } from '../matches/entities/creator-event.entity';
 import { Match } from '../matches/entities/match.entity';
 import { MatchPrediction } from '../matches/entities/match-prediction.entity';
 import { User } from '../users/entities/user.entity';
+import { NotificationGeneratorService } from '../notifications/notification-generator.service';
+import { BroadcasterService } from '../websocket/broadcaster.service';
 
 describe('IndexerService', () => {
   let service: IndexerService;
@@ -134,6 +141,30 @@ describe('IndexerService', () => {
           useValue: matchPredictionRepository,
         },
         { provide: getRepositoryToken(User), useValue: userRepository },
+        {
+          provide: NotificationGeneratorService,
+          useValue: {
+            handleEventCreated: jest.fn(),
+            handleMatchAdded: jest.fn(),
+            handleUserJoinedEvent: jest.fn(),
+            handlePredictionSubmitted: jest.fn(),
+            handleMatchResultSubmitted: jest.fn(),
+            handleWinnersVerified: jest.fn(),
+            handleEventCancelled: jest.fn(),
+          },
+        },
+        {
+          provide: BroadcasterService,
+          useValue: {
+            broadcastEventCreated: jest.fn(),
+            broadcastMatchAdded: jest.fn(),
+            broadcastUserJoined: jest.fn(),
+            broadcastPredictionSubmitted: jest.fn(),
+            broadcastMatchResolved: jest.fn(),
+            broadcastWinnersVerified: jest.fn(),
+            broadcastEventCancelled: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -142,7 +173,7 @@ describe('IndexerService', () => {
 
   describe('reindex', () => {
     it('should reset checkpoint and trigger reindex', async () => {
-      checkpointRepository.upsert.mockResolvedValue({} as any);
+      checkpointRepository.upsert.mockResolvedValue({} as InsertResult);
 
       await service.reindex(100);
 
@@ -187,6 +218,20 @@ describe('IndexerService', () => {
     });
   });
 
+  describe('health helpers', () => {
+    it('tracks events processed per minute', () => {
+      (service as any).recordProcessedEvent();
+      (service as any).recordProcessedEvent();
+
+      expect(service.getEventsProcessedPerMinute()).toBe(2);
+    });
+
+    it('returns last successful sync timestamp', () => {
+      const timestamp = service.getLastSuccessfulSyncTimestamp();
+      expect(timestamp).toBeInstanceOf(Date);
+    });
+  });
+
   describe('retryFailedEvents', () => {
     it('should retry failed events', async () => {
       const failedEvent = {
@@ -209,8 +254,8 @@ describe('IndexerService', () => {
 
       const origCreate = creatorEventRepository.findOne;
       creatorEventRepository.findOne.mockResolvedValue(null);
-      creatorEventRepository.create.mockReturnValue({} as any);
-      creatorEventRepository.save.mockResolvedValue({} as any);
+      creatorEventRepository.create.mockReturnValue({} as CreatorEvent);
+      creatorEventRepository.save.mockResolvedValue({} as CreatorEvent);
 
       const count = await service.retryFailedEvents();
 
@@ -239,7 +284,7 @@ describe('IndexerService', () => {
       };
 
       contractEventRepository.createQueryBuilder.mockReturnValue(
-        mockQueryBuilder as any,
+        mockQueryBuilder as unknown as SelectQueryBuilder<ContractEvent>,
       );
 
       const result = await service.getEventsPaginated(undefined, 10);
@@ -269,11 +314,9 @@ describe('IndexerService', () => {
 
       mockQueryBuilder.getMany.mockResolvedValue(events);
       contractEventRepository.createQueryBuilder.mockReturnValue(
-        mockQueryBuilder as any,
+        mockQueryBuilder as unknown as SelectQueryBuilder<ContractEvent>,
       );
-
       const result = await service.getEventsPaginated(undefined, 5);
-
       expect(result.data).toHaveLength(5);
       expect(result.meta.has_more).toBe(true);
       expect(result.meta.next_cursor).toBeTruthy();
@@ -288,7 +331,9 @@ describe('IndexerService', () => {
 
   describe('cleanupOldEvents', () => {
     it('should delete old processed events', async () => {
-      contractEventRepository.delete.mockResolvedValue({ affected: 10 } as any);
+      contractEventRepository.delete.mockResolvedValue({
+        affected: 10,
+      } as DeleteResult);
 
       const count = await service.cleanupOldEvents(30);
 

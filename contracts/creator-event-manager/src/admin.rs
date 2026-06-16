@@ -117,6 +117,10 @@ pub fn initialize(
     storage.set(&DataKey::Admin(admin.clone()), &admin);
     storage.extend_ttl(&DataKey::Admin(admin.clone()), TTL_LEDGERS, TTL_LEDGERS);
 
+    // Canonical admin retrieval key
+    storage.set(&DataKey::CurrentAdmin, &admin);
+    storage.extend_ttl(&DataKey::CurrentAdmin, TTL_LEDGERS, TTL_LEDGERS);
+
     // AI agent address — address-keyed entry + canonical retrieval key
     storage.set(&DataKey::AIAgent(ai_agent.clone()), &ai_agent);
     storage.extend_ttl(
@@ -189,11 +193,7 @@ pub fn initialize(
 /// # Events
 /// Emits `(Symbol("admin"), Symbol("treasury_updated"))` with data
 /// `(old_treasury, new_treasury)`.
-pub fn set_treasury(
-    env: &Env,
-    caller: Address,
-    new_treasury: Address,
-) -> Result<(), AdminError> {
+pub fn set_treasury(env: &Env, caller: Address, new_treasury: Address) -> Result<(), AdminError> {
     require_is_admin(env, &caller)?;
 
     if new_treasury == env.current_contract_address() {
@@ -247,11 +247,7 @@ pub fn set_treasury(
 /// # Events
 /// Emits `(Symbol("admin"), Symbol("ai_agent_updated"))` with data
 /// `(old_agent, new_agent)`.
-pub fn set_ai_agent(
-    env: &Env,
-    caller: Address,
-    new_agent: Address,
-) -> Result<(), AdminError> {
+pub fn set_ai_agent(env: &Env, caller: Address, new_agent: Address) -> Result<(), AdminError> {
     require_is_admin(env, &caller)?;
 
     if new_agent == env.current_contract_address() {

@@ -130,57 +130,45 @@ pub fn get_match_count(env: &Env, event_id: u64) -> Result<u32, EventError> {
     Ok(event.match_count)
 }
 
-// ---------------------------------------------------------------------------
-// list_event_matches
-// ---------------------------------------------------------------------------
-
-/// Retrieve all matches for an event, sorted by match_time (ascending).
+/// Retrieve all matches for a specific event, sorted by `match_time` ascending.
 ///
-/// # Parameters
-/// * `env` — the contract environment
-/// * `event_id` — the event to query
+/// Looks up the `EventMatches(event_id)` index, fetches each [`Match`] struct,
+/// and returns them in chronological order (earliest match first).
 ///
-/// # Returns
-/// A `Vec<Match>` containing all matches for the event, sorted by match_time.
-/// Returns an empty vector if the event has no matches.
+/// # Sorting behaviour
+/// Results are sorted by `match_time` ascending using an insertion sort.
+/// Matches are appended in creation order, which may differ from schedule
+/// order; the explicit sort guarantees correct ordering regardless.
+///
+/// # Errors
+/// Returns [`EventError::EventNotFound`] when `event_id` does not exist.
 pub fn list_event_matches(env: &Env, event_id: u64) -> Result<Vec<Match>, EventError> {
-    // Verify the event exists
-    let _ = event::get_event(env, event_id)?;
+    // Verify the event exists before reading its match list.
+    event::get_event(env, event_id)?;
 
-    // Get the list of match IDs for this event
     let match_ids = storage::get_event_matches(env, event_id);
 
-    // Load each match
-    let mut matches = Vec::new(env);
+    let mut matches: Vec<Match> = Vec::new(env);
     for match_id in match_ids.iter() {
         if let Ok(m) = storage::get_match(env, match_id) {
             matches.push_back(m);
         }
     }
 
-    // Sort matches by match_time (ascending) using selection sort
+    // Sort by match_time ascending (insertion sort — list is typically small).
     let len = matches.len();
-    for i in 0..len {
-        let mut min_idx = i;
-        for j in (i + 1)..len {
-            if matches.get_unchecked(j).match_time < matches.get_unchecked(min_idx).match_time {
-                min_idx = j;
+    for i in 1..len {
+        let mut j = i;
+        while j > 0 {
+            let prev = matches.get(j - 1).unwrap();
+            let curr = matches.get(j).unwrap();
+            if prev.match_time > curr.match_time {
+                matches.set(j - 1, curr);
+                matches.set(j, prev);
+                j -= 1;
+            } else {
+                break;
             }
-        }
-        
-        // Swap by rebuilding the vector
-        if min_idx != i {
-            let mut new_matches = Vec::new(env);
-            for k in 0..len {
-                if k == i {
-                    new_matches.push_back(matches.get_unchecked(min_idx).clone());
-                } else if k == min_idx {
-                    new_matches.push_back(matches.get_unchecked(i).clone());
-                } else {
-                    new_matches.push_back(matches.get_unchecked(k).clone());
-                }
-            }
-            matches = new_matches;
         }
     }
 

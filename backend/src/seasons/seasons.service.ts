@@ -259,8 +259,8 @@ export class SeasonsService {
       // Step 5: Create winner notification (outside transaction)
       if (topWinner) {
         await this.notificationsService.create(
-          topWinner.id,
-          NotificationType.System,
+          topWinner.stellar_address,
+          NotificationType.EventCreated,
           '🎉 Season Winner!',
           `Congratulations! You are the winner of the ${season.name} season with the highest points!`,
           {

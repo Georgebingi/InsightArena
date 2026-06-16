@@ -1,22 +1,26 @@
 #![no_std]
 
 pub mod admin;
+mod event;
+mod fee;
+mod invite;
+pub mod r#match;
+mod oracle;
+pub mod prediction;
 pub mod storage;
 pub mod storage_types;
-pub mod verification;
-pub mod prediction;
-pub mod r#match;
-mod event;
-mod invite;
 mod token;
+pub mod verification;
+pub mod views;
 
 use soroban_sdk::{contract, contractimpl, Address, Env, String, Symbol, Vec};
 
 use admin::AdminError;
 use event::EventError;
 use r#match::MatchError;
-use storage_types::{Event, Prediction};
+use storage_types::{Event, Match, Prediction, Winner};
 use verification::VerificationError;
+use views::{EventStatistics, PlatformStatistics};
 
 // ---------------------------------------------------------------------------
 // Contract entry point
@@ -247,6 +251,9 @@ impl CreatorEventManagerContract {
     /// * `"invalid_title"` — title is empty or > 200 chars.
     /// * `"invalid_description"` — description is empty or > 1000 chars.
     /// * `"invalid_max_participants"` — max_participants is 0.
+    /// * `"invalid_time_range"` — end_time <= start_time.
+    /// * `"event_start_in_past"` — start_time < current timestamp.
+    /// * `"event_duration_too_long"` — duration exceeds MAX_EVENT_DURATION_SECONDS.
     /// * `"insufficient_fee"` — creator's XLM balance is below the creation fee.
     /// * `"code_generation_failed"` — could not generate a unique invite code.
     pub fn create_event(
@@ -255,13 +262,26 @@ impl CreatorEventManagerContract {
         title: String,
         description: String,
         max_participants: u32,
+        start_time: u64,
+        end_time: u64,
     ) -> (u64, Symbol) {
-        match event::create_event(&env, creator, title, description, max_participants) {
+        match event::create_event(
+            &env,
+            creator,
+            title,
+            description,
+            max_participants,
+            start_time,
+            end_time,
+        ) {
             Ok(result) => result,
             Err(EventError::Paused) => panic!("contract_paused"),
             Err(EventError::InvalidTitle) => panic!("invalid_title"),
             Err(EventError::InvalidDescription) => panic!("invalid_description"),
             Err(EventError::InvalidMaxParticipants) => panic!("invalid_max_participants"),
+            Err(EventError::InvalidTimeRange) => panic!("invalid_time_range"),
+            Err(EventError::EventStartInPast) => panic!("event_start_in_past"),
+            Err(EventError::EventDurationTooLong) => panic!("event_duration_too_long"),
             Err(EventError::InsufficientFee) => panic!("insufficient_fee"),
             Err(EventError::TransferFailed) => panic!("transfer_failed"),
             Err(EventError::CodeGenerationFailed) => panic!("code_generation_failed"),
@@ -292,6 +312,37 @@ impl CreatorEventManagerContract {
         match event::get_event_by_code(&env, invite_code) {
             Ok(e) => e,
             Err(EventError::InvalidInviteCode) => panic!("invalid_invite_code"),
+            Err(EventError::EventNotFound) => panic!("event_not_found"),
+            Err(_) => panic!("unexpected_error"),
+        }
+    }
+
+    /// Return all participant addresses for an event.
+    ///
+    /// Reads the `EventParticipants(event_id)` storage index after validating
+    /// that the event exists. A newly created event returns an empty vector.
+    ///
+    /// # Panics
+    /// * `"event_not_found"` — no event exists with the given ID.
+    pub fn get_event_participants(env: Env, event_id: u64) -> Vec<Address> {
+        match views::get_event_participants(&env, event_id) {
+            Ok(participants) => participants,
+            Err(EventError::EventNotFound) => panic!("event_not_found"),
+            Err(_) => panic!("unexpected_error"),
+        }
+    }
+
+    /// Return aggregate statistics for an event.
+    ///
+    /// The returned [`EventStatistics`] summarizes participant count, match
+    /// count, prediction volume, match result completion, and verified winner
+    /// count for the requested event.
+    ///
+    /// # Panics
+    /// * `"event_not_found"` — no event exists with the given ID.
+    pub fn get_event_statistics(env: Env, event_id: u64) -> EventStatistics {
+        match views::get_event_statistics(&env, event_id) {
+            Ok(statistics) => statistics,
             Err(EventError::EventNotFound) => panic!("event_not_found"),
             Err(_) => panic!("unexpected_error"),
         }
@@ -342,15 +393,45 @@ impl CreatorEventManagerContract {
         }
     }
 
-    /// Retrieve all matches for an event, sorted by match_time (ascending).
+    /// Retrieve all matches for an event, sorted by `match_time` ascending.
+    ///
+    /// Returns a `Vec<Match>` containing every match that belongs to the given
+    /// event, ordered from earliest to latest scheduled start time.  Returns an
+    /// empty `Vec` when the event exists but has no matches.
     ///
     /// # Panics
     /// * `"event_not_found"` — no event exists with the given ID.
-    pub fn list_event_matches(env: Env, event_id: u64) -> Vec<storage_types::Match> {
+    pub fn list_event_matches(env: Env, event_id: u64) -> Vec<Match> {
         match r#match::list_event_matches(&env, event_id) {
             Ok(matches) => matches,
             Err(EventError::EventNotFound) => panic!("event_not_found"),
             Err(_) => panic!("unexpected_error"),
+        }
+    }
+
+    /// Return a snapshot of the contract configuration.
+    pub fn get_config(env: Env) -> views::Config {
+        match views::get_config(&env) {
+            Ok(cfg) => cfg,
+            Err(_) => panic!("not_initialized"),
+        }
+    }
+
+    /// Return the current treasury XLM balance.
+    pub fn get_treasury_balance(env: Env) -> i128 {
+        fee::get_treasury_balance(&env)
+    }
+
+    /// Withdraw collected fees from treasury to `to` address. Only admin may call.
+    pub fn withdraw_fees(env: Env, caller: Address, to: Address, amount: i128) {
+        match fee::withdraw_fees(&env, caller, to, amount) {
+            Ok(()) => {}
+            Err(fee::FeeError::Paused) => panic!("contract_paused"),
+            Err(fee::FeeError::Unauthorized) => panic!("unauthorized"),
+            Err(fee::FeeError::InvalidAddress) => panic!("invalid_address"),
+            Err(fee::FeeError::InvalidAmount) => panic!("invalid_amount"),
+            Err(fee::FeeError::InsufficientBalance) => panic!("insufficient_balance"),
+            Err(fee::FeeError::TransferFailed) => panic!("transfer_failed"),
         }
     }
 
@@ -396,5 +477,130 @@ impl CreatorEventManagerContract {
             Err(prediction::PredictionError::PredictionNotFound) => panic!("prediction_not_found"),
             Err(_) => panic!("unexpected_error"),
         }
+    }
+
+    /// Retrieve all predictions a user has made for a specific event.
+    ///
+    /// Returns a `Vec<Prediction>` sorted by `predicted_at` ascending
+    /// (earliest prediction first).  Returns an empty `Vec` when the user has
+    /// made no predictions for the event.
+    pub fn get_user_predictions(env: Env, user: Address, event_id: u64) -> Vec<Prediction> {
+        prediction::get_user_predictions(&env, user, event_id)
+    }
+
+    /// Return all events a user has joined.
+    pub fn get_user_events(env: Env, user: Address) -> Vec<u64> {
+        views::get_user_events(&env, user)
+    }
+
+    /// Calculate how many users predicted each outcome for a match.
+    ///
+    /// Returns `(team_a_count, team_b_count, draw_count)`.  All three counts
+    /// are always present; outcomes with no predictions return `0`.
+    pub fn get_prediction_distribution(env: Env, match_id: u64) -> (u32, u32, u32) {
+        prediction::get_prediction_distribution(&env, match_id)
+    }
+
+    /// Retrieve every prediction submitted for a specific match (#808).
+    ///
+    /// Returns a `Vec<Prediction>` in submission order. Returns an empty `Vec`
+    /// when the match has no predictions (or the match id does not exist).
+    /// Useful for analytics and displaying a match's full prediction
+    /// distribution.
+    pub fn get_match_predictions(env: Env, match_id: u64) -> Vec<Prediction> {
+        prediction::get_match_predictions(&env, match_id)
+    }
+
+    // =========================================================================
+    // Oracle / Winner Verification (#798–#801, #810)
+    // =========================================================================
+
+    /// Submit a match result as the authorized AI oracle agent (#810).
+    ///
+    /// Resolves the match, records the winning outcome, and grades every
+    /// prediction for the match (sets each `is_correct`). `winning_team` must be
+    /// one of the `TEAM_A`, `TEAM_B`, or `DRAW` symbols, and the match must have
+    /// started (current time >= match_time).
+    ///
+    /// # Panics
+    /// * `"contract_paused"` — the contract is paused.
+    /// * `"unauthorized"` — caller is not the configured AI agent.
+    /// * `"match_not_found"` — no match exists with the given ID.
+    /// * `"result_already_submitted"` — a result was already submitted.
+    /// * `"match_not_started"` — current time is before the match start time.
+    /// * `"invalid_outcome"` — `winning_team` is not a valid outcome symbol.
+    pub fn submit_match_result(env: Env, caller: Address, match_id: u64, winning_team: Symbol) {
+        match oracle::submit_match_result(&env, caller, match_id, winning_team) {
+            Ok(()) => {}
+            Err(oracle::OracleError::Paused) => panic!("contract_paused"),
+            Err(oracle::OracleError::Unauthorized) => panic!("unauthorized"),
+            Err(oracle::OracleError::MatchNotFound) => panic!("match_not_found"),
+            Err(oracle::OracleError::ResultAlreadySubmitted) => panic!("result_already_submitted"),
+            Err(oracle::OracleError::MatchNotStarted) => panic!("match_not_started"),
+            Err(oracle::OracleError::InvalidOutcome) => panic!("invalid_outcome"),
+            Err(_) => panic!("unexpected_error"),
+        }
+    }
+
+    /// Verify and record all perfect scorers for an event.
+    ///
+    /// After all matches in an event are resolved, calculate which users
+    /// predicted all matches correctly and store them as winners.
+    ///
+    /// # Panics
+    /// * `"contract_paused"` — contract is paused.
+    /// * `"event_not_found"` — no event exists with the given ID.
+    /// * `"event_cancelled"` — event has been cancelled.
+    /// * `"matches_not_complete"` — not all matches have been resolved.
+    pub fn verify_event_winners(env: Env, caller: Address, event_id: u64) -> u32 {
+        match oracle::verify_event_winners(&env, caller, event_id) {
+            Ok(count) => count,
+            Err(oracle::OracleError::Paused) => panic!("contract_paused"),
+            Err(oracle::OracleError::EventNotFound) => panic!("event_not_found"),
+            Err(oracle::OracleError::EventCancelled) => panic!("event_cancelled"),
+            Err(oracle::OracleError::MatchesNotComplete) => panic!("matches_not_complete"),
+            Err(oracle::OracleError::Overflow) => panic!("overflow"),
+            Err(_) => panic!("unexpected_error"),
+        }
+    }
+
+    /// Retrieve the list of winners for an event.
+    ///
+    /// Public view function to retrieve the list of winners for an event.
+    /// Used for leaderboards and rewards.
+    ///
+    /// # Panics
+    /// * `"event_not_found"` — no event exists with the given ID.
+    pub fn get_event_winners(env: Env, event_id: u64) -> Vec<Winner> {
+        match oracle::get_event_winners(&env, event_id) {
+            Ok(winners) => winners,
+            Err(oracle::OracleError::EventNotFound) => panic!("event_not_found"),
+            Err(_) => panic!("unexpected_error"),
+        }
+    }
+
+    /// Calculate a user's score (correct predictions) for an event.
+    ///
+    /// Useful for partial scoring and leaderboards.
+    ///
+    /// Returns a tuple `(correct_count, total_matches)`.
+    ///
+    /// # Panics
+    /// * `"event_not_found"` — no event exists with the given ID.
+    pub fn get_user_score(env: Env, user: Address, event_id: u64) -> (u32, u32) {
+        match oracle::get_user_score(&env, user, event_id) {
+            Ok(score) => score,
+            Err(oracle::OracleError::EventNotFound) => panic!("event_not_found"),
+            Err(oracle::OracleError::Overflow) => panic!("overflow"),
+            Err(_) => panic!("unexpected_error"),
+        }
+    }
+
+    /// Get platform-wide statistics.
+    ///
+    /// Returns aggregated statistics including total events, matches,
+    /// predictions, unique participants, and total fees collected.
+    pub fn get_platform_statistics(env: Env) -> PlatformStatistics {
+        views::get_platform_statistics(&env)
     }
 }
