@@ -12,7 +12,8 @@ import { CreatorEvent } from '../matches/entities/creator-event.entity';
 import { Match } from '../matches/entities/match.entity';
 import { MatchPrediction } from '../matches/entities/match-prediction.entity';
 import { User } from '../users/entities/user.entity';
-import { LeaderboardEntry } from '../leaderboard/entities/leaderboard-entry.entity';
+import { CreatorEventLeaderboardEntry } from '../matches/entities/creator-event-leaderboard-entry.entity';
+import { CreatorEventPayout } from '../matches/entities/creator-event-payout.entity';
 import {
   EventByCodeResponseDto,
   MatchPreviewDto,
@@ -45,6 +46,11 @@ import {
   LeaderboardEntryResponse,
   PaginatedLeaderboardResponse,
 } from './dto/leaderboard-query.dto';
+import {
+  PayoutsQueryDto,
+  PaginatedPayoutsDto,
+  PayoutEntryDto,
+} from './dto/payouts-query.dto';
 import {
   normalizeContractPrediction,
   resolveCorrectness,
@@ -89,8 +95,10 @@ export class CreatorEventsService {
     private readonly matchPredictionRepository: Repository<MatchPrediction>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    @InjectRepository(LeaderboardEntry)
-    private readonly leaderboardEntryRepository: Repository<LeaderboardEntry>,
+    @InjectRepository(CreatorEventLeaderboardEntry)
+    private readonly leaderboardEntryRepository: Repository<CreatorEventLeaderboardEntry>,
+    @InjectRepository(CreatorEventPayout)
+    private readonly creatorEventPayoutRepository: Repository<CreatorEventPayout>,
   ) {}
 
   async searchEvents(
