@@ -18,7 +18,14 @@ import { CreatorEventsService } from './creator-events.service';
 @Module({
   imports: [
     ContractModule,
-    TypeOrmModule.forFeature([CreatorEvent, Match, MatchPrediction, User, CreatorEventLeaderboardEntry, CreatorEventPayout]),
+    TypeOrmModule.forFeature([
+      CreatorEvent,
+      Match,
+      MatchPrediction,
+      User,
+      CreatorEventLeaderboardEntry,
+      CreatorEventPayout,
+    ]),
     CacheModule.register(),
   ],
   controllers: [

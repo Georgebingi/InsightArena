@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner, TableColumn } from 'typeorm';
 
-export class AddScorelineAndPointsToMatchPrediction1775900000000
-  implements MigrationInterface
-{
+export class AddScorelineAndPointsToMatchPrediction1775900000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.addColumns('match_predictions', [
       new TableColumn({
