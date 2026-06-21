@@ -58,6 +58,7 @@ fn add_match(env: &Env, event_id: u64, submitted: bool) -> u64 {
         String::from_str(env, "Team A"),
         String::from_str(env, "Team B"),
         env.ledger().timestamp() + 10_000,
+        1u32,
     );
 
     if submitted {

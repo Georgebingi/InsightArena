@@ -101,6 +101,7 @@ fn create_funded_event(
                 String::from_str(env, &format!("Team A{}", i)),
                 String::from_str(env, &format!("Team B{}", i)),
                 env.ledger().timestamp() + 100 + (i as u64) * 60,
+                1u32,
             );
             storage::set_match(env, match_id, &match_record);
             storage::add_event_match(env, event_id, match_id);
