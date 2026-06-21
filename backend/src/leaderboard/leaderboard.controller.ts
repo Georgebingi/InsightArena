@@ -10,6 +10,10 @@ import {
   PaginatedLeaderboardHistoryResponse,
 } from './dto/leaderboard-history.dto';
 import { UserRankDto } from './dto/user-rank.dto';
+import {
+  CursorPaginationDto,
+  PaginatedCursorResponse,
+} from './dto/cursor-pagination.dto';
 import { Public } from '../common/decorators/public.decorator';
 
 @ApiTags('Leaderboard')
@@ -37,6 +41,29 @@ export class LeaderboardController {
     @Query() query: LeaderboardQueryDto,
   ): Promise<PaginatedLeaderboardResponse> {
     return this.leaderboardService.getLeaderboard(query);
+  }
+
+  @Get('cursor')
+  @Public()
+  @ApiOperation({
+    summary: 'Get leaderboard with cursor-based pagination (stable, cached)',
+  })
+  @ApiQuery({ name: 'cursor', required: false, type: String })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Max 100',
+  })
+  @ApiQuery({ name: 'season_id', required: false, type: String })
+  @ApiResponse({
+    status: 200,
+    description: 'Cursor-paginated leaderboard with caching for hot pages',
+  })
+  async getLeaderboardCursor(
+    @Query() query: CursorPaginationDto,
+  ): Promise<PaginatedCursorResponse> {
+    return this.leaderboardService.getLeaderboardCursor(query);
   }
 
   @Get('history')
