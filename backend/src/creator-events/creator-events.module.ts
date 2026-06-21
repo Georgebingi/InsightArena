@@ -3,6 +3,9 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ContractModule } from '../contract/contract.module';
 import { CreatorEvent } from '../matches/entities/creator-event.entity';
+import { Match } from '../matches/entities/match.entity';
+import { MatchPrediction } from '../matches/entities/match-prediction.entity';
+import { User } from '../users/entities/user.entity';
 import { CreatorEventLeaderboardEntry } from '../matches/entities/creator-event-leaderboard-entry.entity';
 import { CreatorEventPayout } from '../matches/entities/creator-event-payout.entity';
 import {
@@ -15,11 +18,7 @@ import { CreatorEventsService } from './creator-events.service';
 @Module({
   imports: [
     ContractModule,
-    TypeOrmModule.forFeature([
-      CreatorEvent,
-      CreatorEventLeaderboardEntry,
-      CreatorEventPayout,
-    ]),
+    TypeOrmModule.forFeature([CreatorEvent, Match, MatchPrediction, User, CreatorEventLeaderboardEntry, CreatorEventPayout]),
     CacheModule.register(),
   ],
   controllers: [

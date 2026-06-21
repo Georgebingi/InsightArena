@@ -1,12 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, Repository } from 'typeorm';
-import { CreatorEventPayout } from '../matches/entities/creator-event-payout.entity';
-import {
-  PaginatedPayoutsDto,
-  PayoutEntryDto,
-  PayoutsQueryDto,
-} from './dto/payouts.dto';
+import { Brackets, In, Repository } from 'typeorm';
 import {
   ContractService,
   ContractEvent,
@@ -15,7 +9,11 @@ import {
   ContractMatch,
 } from '../contract/contract.service';
 import { CreatorEvent } from '../matches/entities/creator-event.entity';
+import { Match } from '../matches/entities/match.entity';
+import { MatchPrediction } from '../matches/entities/match-prediction.entity';
+import { User } from '../users/entities/user.entity';
 import { CreatorEventLeaderboardEntry } from '../matches/entities/creator-event-leaderboard-entry.entity';
+import { CreatorEventPayout } from '../matches/entities/creator-event-payout.entity';
 import {
   EventByCodeResponseDto,
   MatchPreviewDto,
@@ -48,6 +46,11 @@ import {
   LeaderboardEntryResponse,
   PaginatedLeaderboardResponse,
 } from './dto/leaderboard-query.dto';
+import {
+  PayoutsQueryDto,
+  PaginatedPayoutsDto,
+  PayoutEntryDto,
+} from './dto/payouts.dto';
 import {
   normalizeContractPrediction,
   resolveCorrectness,
@@ -86,9 +89,14 @@ export class CreatorEventsService {
     private readonly contractService: ContractService,
     @InjectRepository(CreatorEvent)
     private readonly creatorEventRepository: Repository<CreatorEvent>,
+    @InjectRepository(Match)
+    private readonly matchRepository: Repository<Match>,
+    @InjectRepository(MatchPrediction)
+    private readonly matchPredictionRepository: Repository<MatchPrediction>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
     @InjectRepository(CreatorEventLeaderboardEntry)
     private readonly leaderboardEntryRepository: Repository<CreatorEventLeaderboardEntry>,
-
     @InjectRepository(CreatorEventPayout)
     private readonly creatorEventPayoutRepository: Repository<CreatorEventPayout>,
   ) {}
@@ -542,6 +550,28 @@ export class CreatorEventsService {
       incorrectPredictions === 0 &&
       pendingPredictions === 0;
 
+    let totalPoints = 0;
+    const userEntity = await this.userRepository.findOne({
+      where: { stellar_address: address },
+    });
+    if (userEntity && matches.length > 0) {
+      const dbMatches = await this.matchRepository.find({
+        where: { event: { on_chain_event_id: Number(eventId) } },
+      });
+      if (dbMatches.length > 0) {
+        const dbPredictions = await this.matchPredictionRepository.find({
+          where: {
+            user: { id: userEntity.id },
+            match: { id: In(dbMatches.map((m) => m.id)) },
+          },
+        });
+        totalPoints = dbPredictions.reduce(
+          (sum, p) => sum + p.points_earned,
+          0,
+        );
+      }
+    }
+
     return {
       address,
       totalMatches: matches.length,
@@ -552,6 +582,7 @@ export class CreatorEventsService {
       accuracyPercentage,
       rank,
       isWinner,
+      totalPoints,
     };
   }
 
