@@ -37,7 +37,7 @@ export class LeaderboardController {
   async getTopLeaderboard(
     @Param('n', ParseIntPipe) n: number,
   ): Promise<LeaderboardEntryResponse[]> {
-    return this.leaderboardService.getTopN(n);
+    return this.leaderboardService.getTopLeaderboard(n);
   }
 
   @Get()
