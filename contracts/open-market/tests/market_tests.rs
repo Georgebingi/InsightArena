@@ -835,3 +835,86 @@ fn cancel_market_refunds_all_predictors() {
     assert_eq!(token_client.balance(&predictor_b), stake_b);
     assert!(client.get_market(&id).is_cancelled);
 }
+
+#[test]
+fn cancel_market_refunds_exact_stake_amounts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _oracle, xlm_token) = deploy_with_token(&env);
+    let creator = Address::generate(&env);
+
+    let id = client.create_market(&creator, &default_params(&env));
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let user3 = Address::generate(&env);
+    let stake1: i128 = 100_000_000; // 100 XLM
+    let stake2: i128 = 250_000_000; // 250 XLM
+    let stake3: i128 = 500_000_000; // 500 XLM
+    let contract_id = client.address.clone();
+
+    // Manually inject predictions into storage (following existing test pattern)
+    env.as_contract(&contract_id, || {
+        let pred1 = Prediction::new(
+            id,
+            user1.clone(),
+            symbol_short!("yes"),
+            stake1,
+            env.ledger().timestamp(),
+        );
+        let pred2 = Prediction::new(
+            id,
+            user2.clone(),
+            symbol_short!("no"),
+            stake2,
+            env.ledger().timestamp(),
+        );
+        let pred3 = Prediction::new(
+            id,
+            user3.clone(),
+            symbol_short!("yes"),
+            stake3,
+            env.ledger().timestamp(),
+        );
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Prediction(id, user1.clone()), &pred1);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Prediction(id, user2.clone()), &pred2);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Prediction(id, user3.clone()), &pred3);
+
+        let mut predictors = Vec::new(&env);
+        predictors.push_back(user1.clone());
+        predictors.push_back(user2.clone());
+        predictors.push_back(user3.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::PredictorList(id), &predictors);
+    });
+
+    // Mint total stake amount to contract
+    StellarAssetClient::new(&env, &xlm_token).mint(&contract_id, &(stake1 + stake2 + stake3));
+
+    let token_client = TokenClient::new(&env, &xlm_token);
+
+    // Admin cancels the market
+    client.cancel_market(&admin, &id);
+
+    // Assert each user's balance is restored exactly
+    assert_eq!(token_client.balance(&user1), stake1);
+    assert_eq!(token_client.balance(&user2), stake2);
+    assert_eq!(token_client.balance(&user3), stake3);
+
+    // Assert market is cancelled
+    assert!(client.get_market(&id).is_cancelled);
+
+    // Assert further predictions fail with MarketAlreadyCancelled
+    let result = client.try_submit_prediction(&user1, &id, &symbol_short!("yes"), &stake1);
+    assert!(matches!(
+        result,
+        Err(Ok(InsightArenaError::MarketAlreadyCancelled))
+    ));
+}
