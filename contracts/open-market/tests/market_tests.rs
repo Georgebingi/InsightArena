@@ -976,7 +976,7 @@ fn extend_market_end_time_success() {
     let (client, _admin, _oracle, _) = deploy_with_token(&env);
     let creator = Address::generate(&env);
 
-    let mut params = default_params(&env);
+    let params = default_params(&env);
     let original_end_time = params.end_time;
     let id = client.create_market(&creator, &params);
 
@@ -994,7 +994,7 @@ fn extend_market_end_time_adjusts_resolution_time_if_needed() {
     let (client, _admin, _oracle, _) = deploy_with_token(&env);
     let creator = Address::generate(&env);
 
-    let mut params = default_params(&env);
+    let params = default_params(&env);
     let resolution_time = params.resolution_time;
     let id = client.create_market(&creator, &params);
 
@@ -1055,7 +1055,7 @@ fn extend_market_end_time_fails_new_end_time_not_strictly_later() {
 fn extend_market_end_time_fails_when_resolved() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin, oracle, xlm_token) = deploy_with_token(&env);
+    let (client, _admin, oracle, _) = deploy_with_token(&env);
     let creator = Address::generate(&env);
 
     let params = default_params(&env);
@@ -1101,5 +1101,4 @@ fn extend_market_end_time_fails_when_closed() {
     env.ledger().set_timestamp(params.end_time);
     let result = client.try_extend_market_end_time(&creator, &id, &(params.end_time + 500));
     assert!(matches!(result, Err(Ok(InsightArenaError::MarketAlreadyClosed))));
-}
 }
