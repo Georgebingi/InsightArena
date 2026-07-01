@@ -105,6 +105,7 @@ export class EventsGateway
   ): Promise<void> {
     if (!this.checkRateLimit(client.id)) {
       client.emit('error', { message: 'Rate limit exceeded' });
+      client.disconnect();
       return;
     }
 

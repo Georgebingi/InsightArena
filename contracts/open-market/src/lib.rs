@@ -175,6 +175,16 @@ impl InsightArenaContract {
         market::update_creator_fee(&env, creator, market_id, new_creator_fee_bps)
     }
 
+    /// Extend the end_time of a market before it closes.
+    pub fn extend_market_end_time(
+        env: Env,
+        creator: Address,
+        market_id: u64,
+        new_end_time: u64,
+    ) -> Result<(), InsightArenaError> {
+        market::extend_market_end_time(&env, creator, market_id, new_end_time)
+    }
+
     /// Cancel a market and refund all stakers.
     pub fn cancel_market(
         env: Env,
@@ -255,6 +265,11 @@ impl InsightArenaContract {
     /// Enumerate all markets that currently have an active dispute.
     pub fn list_active_disputes(env: Env) -> Vec<u64> {
         dispute::list_active_disputes(&env)
+    }
+
+    /// Get the total count of currently open disputes.
+    pub fn get_open_dispute_count(env: Env) -> u32 {
+        dispute::get_open_dispute_count(&env)
     }
 
     // ── Prediction ────────────────────────────────────────────────────────────

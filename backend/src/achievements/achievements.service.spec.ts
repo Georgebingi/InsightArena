@@ -167,6 +167,76 @@ describe('AchievementsService', () => {
     });
   });
 
+  describe('TOTAL_STAKED achievement boundary tests', () => {
+    const makeStakeUser = (total_staked_stroops: string) =>
+      ({
+        id: 'user-1',
+        stellar_address: 'GABC123',
+        total_predictions: 0,
+        correct_predictions: 0,
+        total_staked_stroops,
+        reputation_score: 0,
+      }) as User;
+
+    beforeEach(() => {
+      achievementsRepository.findOne.mockImplementation((options: any) => {
+        const type = options?.where?.type;
+        return Promise.resolve({ id: `ach-${type}`, type } as Achievement);
+      });
+      userAchievementsRepository.findOne.mockResolvedValue(null);
+      userAchievementsRepository.save.mockClear();
+    });
+
+    const savedTypes = () =>
+      userAchievementsRepository.save.mock.calls.map(
+        (call) => (call[0] as any).achievement.type,
+      );
+
+    it('should NOT unlock TOTAL_STAKED_1M when staked is 999999 (just below 1M)', async () => {
+      const user = makeStakeUser('999999');
+      usersRepository.findOne.mockResolvedValue(user);
+      await service.checkAndUnlockAchievements(user);
+      expect(savedTypes()).not.toContain(AchievementType.TOTAL_STAKED_1M);
+    });
+
+    it('should unlock TOTAL_STAKED_1M when staked is exactly 1000000', async () => {
+      const user = makeStakeUser('1000000');
+      usersRepository.findOne.mockResolvedValue(user);
+      await service.checkAndUnlockAchievements(user);
+      expect(savedTypes()).toContain(AchievementType.TOTAL_STAKED_1M);
+    });
+
+    it('should NOT unlock TOTAL_STAKED_10M when staked is 9999999 (just below 10M), but TOTAL_STAKED_1M already unlocked is not re-awarded', async () => {
+      const user = makeStakeUser('9999999');
+      usersRepository.findOne.mockResolvedValue(user);
+      userAchievementsRepository.findOne.mockImplementation((options: any) => {
+        const type = options?.where?.achievement?.id;
+        if (type === `ach-${AchievementType.TOTAL_STAKED_1M}`) {
+          return Promise.resolve({ id: 'ua-1m', is_unlocked: true } as any);
+        }
+        return Promise.resolve(null);
+      });
+      await service.checkAndUnlockAchievements(user);
+      expect(savedTypes()).not.toContain(AchievementType.TOTAL_STAKED_10M);
+      expect(savedTypes()).not.toContain(AchievementType.TOTAL_STAKED_1M);
+    });
+
+    it('should unlock only TOTAL_STAKED_10M when staked is exactly 10000000 and TOTAL_STAKED_1M already unlocked', async () => {
+      const user = makeStakeUser('10000000');
+      usersRepository.findOne.mockResolvedValue(user);
+      userAchievementsRepository.findOne.mockImplementation((options: any) => {
+        const achievementId = options?.where?.achievement?.id;
+        if (achievementId === `ach-${AchievementType.TOTAL_STAKED_1M}`) {
+          return Promise.resolve({ id: 'ua-1m', is_unlocked: true } as any);
+        }
+        return Promise.resolve(null);
+      });
+      await service.checkAndUnlockAchievements(user);
+      expect(savedTypes()).toContain(AchievementType.TOTAL_STAKED_10M);
+      expect(savedTypes()).not.toContain(AchievementType.TOTAL_STAKED_1M);
+    });
+  });
+
   describe('idempotency: no double-award', () => {
     const qualifyingUser = {
       id: 'user-1',

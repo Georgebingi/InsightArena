@@ -21,6 +21,7 @@ import { WebhookAuthGuard } from './guards/webhook-auth.guard';
 import {
   ListPendingMatchesQueryDto,
   PaginatedPendingMatchesResponse,
+  OracleStatsResponse,
 } from './dto/list-pending-matches-query.dto';
 import {
   WebhookMatchResultDto,
@@ -78,6 +79,19 @@ export class OracleController {
     @Body() dto: WebhookMatchResultDto,
   ): Promise<WebhookResponseDto> {
     return this.webhookService.processMatchResult(dto);
+  }
+
+  @Get('stats')
+  @UseGuards(OracleAuthGuard)
+  @ApiSecurity('api-key')
+  @ApiOperation({ summary: 'Get summary of match submission status counts' })
+  @ApiResponse({
+    status: 200,
+    description: 'Counts of pending, resolved, and overdue matches',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized - invalid API key' })
+  async getStats(): Promise<OracleStatsResponse> {
+    return this.oracleService.getStats();
   }
 
   @Get('submissions')

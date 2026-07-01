@@ -585,6 +585,56 @@ fn list_markets_empty_when_start_out_of_bounds() {
 }
 
 #[test]
+fn list_markets_pagination_returns_correct_slices_with_no_gaps() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let creator = Address::generate(&env);
+
+    for _ in 0..10 {
+        client.create_market(&creator, &default_params(&env));
+    }
+
+    let first_page = client.list_markets(&1_u64, &5_u32);
+    assert_eq!(first_page.len(), 5);
+    assert_eq!(first_page.get(0).unwrap().market_id, 1);
+    assert_eq!(first_page.get(1).unwrap().market_id, 2);
+    assert_eq!(first_page.get(2).unwrap().market_id, 3);
+    assert_eq!(first_page.get(3).unwrap().market_id, 4);
+    assert_eq!(first_page.get(4).unwrap().market_id, 5);
+
+    let second_page = client.list_markets(&6_u64, &5_u32);
+    assert_eq!(second_page.len(), 5);
+    assert_eq!(second_page.get(0).unwrap().market_id, 6);
+    assert_eq!(second_page.get(1).unwrap().market_id, 7);
+    assert_eq!(second_page.get(2).unwrap().market_id, 8);
+    assert_eq!(second_page.get(3).unwrap().market_id, 9);
+    assert_eq!(second_page.get(4).unwrap().market_id, 10);
+
+    let mut all_ids: Vec<u64> = Vec::new(&env);
+    for i in 0..5 {
+        all_ids.push_back(first_page.get(i).unwrap().market_id);
+    }
+    for i in 0..5 {
+        all_ids.push_back(second_page.get(i).unwrap().market_id);
+    }
+    let mut seen = Vec::new(&env);
+    for i in 0..10 {
+        let id = all_ids.get(i).unwrap();
+        assert!(!seen.contains(id), "duplicate market_id {}", id);
+        seen.push_back(id);
+    }
+
+    let last_partial = client.list_markets(&9_u64, &5_u32);
+    assert_eq!(last_partial.len(), 2);
+    assert_eq!(last_partial.get(0).unwrap().market_id, 9);
+    assert_eq!(last_partial.get(1).unwrap().market_id, 10);
+
+    let out_of_bounds = client.list_markets(&11_u64, &5_u32);
+    assert_eq!(out_of_bounds.len(), 0);
+}
+
+#[test]
 fn close_market_fails_before_end_time() {
     let env = Env::default();
     env.mock_all_auths();
@@ -917,4 +967,138 @@ fn cancel_market_refunds_exact_stake_amounts() {
         result,
         Err(Ok(InsightArenaError::MarketAlreadyCancelled))
     ));
+}
+
+#[test]
+fn extend_market_end_time_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _oracle, _) = deploy_with_token(&env);
+    let creator = Address::generate(&env);
+
+    let params = default_params(&env);
+    let original_end_time = params.end_time;
+    let id = client.create_market(&creator, &params);
+
+    let new_end_time = original_end_time + 500;
+    client.extend_market_end_time(&creator, &id, &new_end_time);
+
+    let market = client.get_market(&id);
+    assert_eq!(market.end_time, new_end_time);
+}
+
+#[test]
+fn extend_market_end_time_adjusts_resolution_time_if_needed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _oracle, _) = deploy_with_token(&env);
+    let creator = Address::generate(&env);
+
+    let params = default_params(&env);
+    let resolution_time = params.resolution_time;
+    let id = client.create_market(&creator, &params);
+
+    let new_end_time = resolution_time + 500;
+    client.extend_market_end_time(&creator, &id, &new_end_time);
+
+    let market = client.get_market(&id);
+    assert_eq!(market.end_time, new_end_time);
+    assert_eq!(market.resolution_time, new_end_time);
+}
+
+#[test]
+fn extend_market_end_time_fails_non_creator() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _oracle, _) = deploy_with_token(&env);
+    let creator = Address::generate(&env);
+    let other = Address::generate(&env);
+
+    let params = default_params(&env);
+    let id = client.create_market(&creator, &params);
+
+    let result = client.try_extend_market_end_time(&other, &id, &(params.end_time + 500));
+    assert!(matches!(result, Err(Ok(InsightArenaError::Unauthorized))));
+}
+
+#[test]
+fn extend_market_end_time_fails_after_end_time() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _oracle, _) = deploy_with_token(&env);
+    let creator = Address::generate(&env);
+
+    let params = default_params(&env);
+    let id = client.create_market(&creator, &params);
+
+    env.ledger().set_timestamp(params.end_time);
+
+    let result = client.try_extend_market_end_time(&creator, &id, &(params.end_time + 500));
+    assert!(matches!(result, Err(Ok(InsightArenaError::MarketExpired))));
+}
+
+#[test]
+fn extend_market_end_time_fails_new_end_time_not_strictly_later() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _oracle, _) = deploy_with_token(&env);
+    let creator = Address::generate(&env);
+
+    let params = default_params(&env);
+    let id = client.create_market(&creator, &params);
+
+    let result = client.try_extend_market_end_time(&creator, &id, &params.end_time);
+    assert!(matches!(result, Err(Ok(InsightArenaError::InvalidTimeRange))));
+}
+
+#[test]
+fn extend_market_end_time_fails_when_resolved() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, oracle, _) = deploy_with_token(&env);
+    let creator = Address::generate(&env);
+
+    let params = default_params(&env);
+    let id = client.create_market(&creator, &params);
+
+    env.ledger()
+        .with_mut(|li| li.timestamp = params.resolution_time + 1);
+    client.resolve_market(&oracle, &id, &symbol_short!("yes"));
+
+    let result = client.try_extend_market_end_time(&creator, &id, &(params.end_time + 500));
+    assert!(matches!(result, Err(Ok(InsightArenaError::MarketAlreadyResolved))));
+}
+
+#[test]
+fn extend_market_end_time_fails_when_cancelled() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _oracle, _) = deploy_with_token(&env);
+    let creator = Address::generate(&env);
+
+    let params = default_params(&env);
+    let id = client.create_market(&creator, &params);
+
+    client.cancel_market(&admin, &id);
+
+    let result = client.try_extend_market_end_time(&creator, &id, &(params.end_time + 500));
+    assert!(matches!(result, Err(Ok(InsightArenaError::MarketAlreadyCancelled))));
+}
+
+#[test]
+fn extend_market_end_time_fails_when_closed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _oracle, _) = deploy_with_token(&env);
+    let creator = Address::generate(&env);
+
+    let params = default_params(&env);
+    let id = client.create_market(&creator, &params);
+
+    env.ledger().set_timestamp(params.end_time + 1);
+    client.close_market(&creator, &id);
+
+    env.ledger().set_timestamp(params.end_time);
+    let result = client.try_extend_market_end_time(&creator, &id, &(params.end_time + 500));
+    assert!(matches!(result, Err(Ok(InsightArenaError::MarketAlreadyClosed))));
 }

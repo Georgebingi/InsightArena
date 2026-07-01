@@ -1,5 +1,5 @@
 use soroban_sdk::testutils::{storage::Persistent as _, Address as _, Ledger};
-use soroban_sdk::token::StellarAssetClient;
+use soroban_sdk::token::{Client as TokenClient, StellarAssetClient};
 use soroban_sdk::{symbol_short, vec, Address, Env, String, Symbol};
 
 use insightarena_contract::config::LEDGER_BUMP_MARKET;
@@ -294,6 +294,59 @@ fn test_batch_distribute_payouts_distributes_to_all_winners() {
 }
 
 #[test]
+fn test_batch_distribute_payouts_pays_all_unclaimed_winners_correctly_idempotent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, xlm_token, _, oracle) = deploy(&env);
+
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let user3 = Address::generate(&env);
+    let stake = 50_000_000_i128;
+
+    let params = default_params(&env);
+    let market_id = client.create_market(&Address::generate(&env), &params);
+
+    fund(&env, &xlm_token, &user1, stake);
+    fund(&env, &xlm_token, &user2, stake);
+    fund(&env, &xlm_token, &user3, stake);
+
+    client.submit_prediction(&user1, &market_id, &symbol_short!("yes"), &stake);
+    client.submit_prediction(&user2, &market_id, &symbol_short!("yes"), &stake);
+    client.submit_prediction(&user3, &market_id, &symbol_short!("no"), &stake);
+
+    // Resolve with outcome A ("yes")
+    env.ledger()
+        .with_mut(|li| li.timestamp = params.resolution_time + 1);
+    client.resolve_market(&oracle, &market_id, &symbol_short!("yes"));
+
+    // First batch: should process 2 winners
+    let processed_first = client.batch_distribute_payouts(&oracle, &market_id);
+    assert_eq!(processed_first, 2);
+
+    // Winners should now be marked as paid
+    assert!(matches!(
+        client.try_claim_payout(&user1, &market_id),
+        Err(Ok(InsightArenaError::PayoutAlreadyClaimed))
+    ));
+    assert!(matches!(
+        client.try_claim_payout(&user2, &market_id),
+        Err(Ok(InsightArenaError::PayoutAlreadyClaimed))
+    ));
+
+    // Losers must remain unaffected
+    let losers_claim_result = client.try_claim_payout(&user3, &market_id);
+    assert!(matches!(
+        losers_claim_result,
+        Err(Ok(InsightArenaError::InvalidOutcome))
+    ));
+
+    // Second batch: all winning predictions already claimed — returns 0
+    let processed_second = client.batch_distribute_payouts(&oracle, &market_id);
+    assert_eq!(processed_second, 0);
+}
+
+#[test]
 fn test_batch_distribute_payouts_fails_for_non_admin() {
     let env = Env::default();
     env.mock_all_auths();
@@ -562,14 +615,14 @@ fn test_submit_prediction_on_cancelled_market_fails() {
     let stake = 20_000_000_i128; // Meets the min_stake requirement
 
     // 2. Pass the authorized manager to create the market
-    let market_id = client.create_market(&manager, &default_params(&env)); 
+    let market_id = client.create_market(&manager, &default_params(&env));
 
     // 3. Fund your test users using the token returned by deploy()
     fund(&env, &xlm_token, &user_alpha, stake);
     fund(&env, &xlm_token, &user_beta, stake);
 
     let outcome_side = symbol_short!("yes");
-    
+
     // 4. User Alpha makes a valid prediction BEFORE cancellation
     client.submit_prediction(&user_alpha, &market_id, &outcome_side, &stake);
     assert!(client.has_predicted(&market_id, &user_alpha));
@@ -587,4 +640,56 @@ fn test_submit_prediction_on_cancelled_market_fails() {
     // 7. Verify post-cancellation status checks remain accurate
     assert!(client.has_predicted(&market_id, &user_alpha));
     assert!(!client.has_predicted(&market_id, &user_gamma));
+}
+
+#[test]
+fn test_batch_distribute_payouts_idempotent_with_winners_and_losers() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, xlm_token, _, oracle) = deploy(&env);
+
+    let winner1 = Address::generate(&env);
+    let winner2 = Address::generate(&env);
+    let loser1 = Address::generate(&env);
+    let loser2 = Address::generate(&env);
+    let stake = 50_000_000_i128;
+
+    let params = default_params(&env);
+    let market_id = client.create_market(&Address::generate(&env), &params);
+
+    fund(&env, &xlm_token, &winner1, stake);
+    fund(&env, &xlm_token, &winner2, stake);
+    fund(&env, &xlm_token, &loser1, stake);
+    fund(&env, &xlm_token, &loser2, stake);
+
+    client.submit_prediction(&winner1, &market_id, &symbol_short!("yes"), &stake);
+    client.submit_prediction(&winner2, &market_id, &symbol_short!("yes"), &stake);
+    client.submit_prediction(&loser1, &market_id, &symbol_short!("no"), &stake);
+    client.submit_prediction(&loser2, &market_id, &symbol_short!("no"), &stake);
+
+    env.ledger()
+        .with_mut(|li| li.timestamp = params.resolution_time + 1);
+    client.resolve_market(&oracle, &market_id, &symbol_short!("yes"));
+
+    // First batch: processes both winners
+    let first_count = client.batch_distribute_payouts(&oracle, &market_id);
+    assert_eq!(first_count, 2);
+
+    let token = TokenClient::new(&env, &xlm_token);
+    let winner1_bal = token.balance(&winner1);
+    let winner2_bal = token.balance(&winner2);
+    assert!(winner1_bal > 0);
+    assert!(winner2_bal > 0);
+
+    // Second batch: all winners already paid, losers skipped — payout_claimed flag prevents double payment
+    let second_count = client.batch_distribute_payouts(&oracle, &market_id);
+    assert_eq!(second_count, 0);
+
+    // Winner balances unchanged — no double payment
+    assert_eq!(token.balance(&winner1), winner1_bal);
+    assert_eq!(token.balance(&winner2), winner2_bal);
+
+    // Losers received nothing (their stakes funded the winner payouts)
+    assert_eq!(token.balance(&loser1), 0);
+    assert_eq!(token.balance(&loser2), 0);
 }
